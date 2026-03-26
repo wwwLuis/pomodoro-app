@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "A Pomodoro Timer App"
 authors = ["you"]
 edition = "2021"
+license = "GPL-3.0-only"
 
 [lib]
 name = "pomodoro_app_lib"

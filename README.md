@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/Tauri-2-24C8D8?style=flat-square&logo=tauri&logoColor=white" />
   <img src="https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white" />
   <img src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white" />
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
+  <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square" />
 </p>
 
 ---
@@ -268,6 +268,6 @@ npm run check:watch   # Continuous
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+GPL-3.0 — see [LICENSE](LICENSE)
 
 <p align="center"><sub>Built with Tauri, Svelte, and a pinch of Rust.</sub></p>
