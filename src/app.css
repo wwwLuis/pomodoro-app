@@ -1,0 +1,311 @@
+/* ─── Inter Font ─── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ─── CSS Reset ─── */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ─── Light Theme (default) ─── */
+:root {
+  --text: #1a1a2e;
+  --text-secondary: #4a4a6a;
+  --text-muted: #9494b0;
+
+  --bg: #f8f9fc;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f1f5;
+  --bg-active: #eef0ff;
+
+  --border: #e2e4ec;
+  --border-light: #eceef4;
+  --accent: #6366f1;
+  --accent-hover: #5558e6;
+  --accent-border: #c7c8fd;
+  --accent-bg: #eef0ff;
+
+  --radius: 10px;
+  --radius-lg: 14px;
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.08);
+
+  --favorite: #f59e0b;
+  --danger: #ef4444;
+  --danger-bg: #fef2f2;
+  --success: #10b981;
+
+  color-scheme: light;
+}
+
+/* ─── Dark Theme ─── */
+:root[data-theme="dark"] {
+  --text: #e8e8f0;
+  --text-secondary: #a8a8c0;
+  --text-muted: #6b6b88;
+
+  --bg: #12121c;
+  --bg-card: #1a1a28;
+  --bg-hover: #222234;
+  --bg-active: #252540;
+
+  --border: #2a2a40;
+  --border-light: #222238;
+  --accent: #818cf8;
+  --accent-hover: #6d77f5;
+  --accent-border: #3b3b6e;
+  --accent-bg: #1e1e38;
+
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.35);
+
+  --favorite: #fbbf24;
+  --danger: #f87171;
+  --danger-bg: #2a1a1a;
+  --success: #34d399;
+
+  color-scheme: dark;
+}
+
+/* ─── Base ─── */
+html {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--bg);
+  color: var(--text);
+  transition: background var(--transition), color var(--transition);
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  transition: background var(--transition);
+}
+
+/* ─── App Shell ─── */
+.app-shell {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+  min-height: 100vh;
+}
+
+/* ─── Typography ─── */
+h1, h2, h3 {
+  line-height: 1.2;
+  color: var(--text);
+}
+
+/* ─── Inputs ─── */
+input, textarea, select {
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+  width: 100%;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+}
+
+input:hover, textarea:hover {
+  border-color: var(--text-muted);
+}
+
+input:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+:root[data-theme="dark"] input:focus,
+:root[data-theme="dark"] textarea:focus {
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.15);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+/* ─── Labels ─── */
+.label, label.label {
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+/* ─── Buttons ─── */
+button {
+  font-family: inherit;
+  border: none;
+  cursor: pointer;
+  background: none;
+  font-size: inherit;
+  line-height: 1;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 20px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border-radius: var(--radius);
+  transition: all var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.12), transparent);
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+}
+
+.btn-primary:hover::before {
+  opacity: 1;
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  transition: all var(--transition);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+/* ─── Icon Buttons ─── */
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.icon-btn.active {
+  color: var(--favorite);
+}
+
+.icon-btn.danger:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* ─── Tags ─── */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  transition: background var(--transition);
+}
+
+.tag.cat {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tag.opt {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+}
+
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ─── Selection ─── */
+::selection {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--text);
+}
+
+:root[data-theme="dark"] ::selection {
+  background: rgba(129, 140, 248, 0.25);
+}

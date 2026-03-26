@@ -1,0 +1,8 @@
+node_modules/
+build/
+.svelte-kit/
+dist/
+target/
+.vite/
+*.exe
+*.msi
