@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
 use tauri::image::Image;
-use tauri::{Emitter, Manager};
+use tauri::{Manager};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 use url::Url;
 
@@ -124,7 +124,18 @@ pub fn run() {
                 .with_handler(move |app, _sc, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("toggle-timer", ());
+                            // Toggle window visibility: if visible & focused → hide,
+                            // otherwise bring to front and focus
+                            let visible = window.is_visible().unwrap_or(true);
+                            let opend = !(window.is_minimized().unwrap_or(true));
+
+                            if visible && opend{
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                 })

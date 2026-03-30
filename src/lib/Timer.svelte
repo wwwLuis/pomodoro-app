@@ -41,8 +41,22 @@
   $: musicLoading = $musicPlayerState === "loading";
   $: musicError = $musicPlayerState === "error";
 
+  // Bring window to front (even if hidden or minimized)
+  async function bringWindowToFront() {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      await win.show();
+      await win.unminimize();
+      await win.setFocus();
+    } catch {}
+  }
+
   // Notifications
   async function notifyComplete(sessionType: SessionType) {
+    // Always bring window to front when a session completes
+    bringWindowToFront();
+
     try {
       const { isPermissionGranted, requestPermission, sendNotification } =
         await import("@tauri-apps/plugin-notification");
@@ -250,6 +264,11 @@
   <div class="today-stats">
     <span class="today-label">Heute</span>
     <span class="today-value">{$todayStats.count} Pomodoros &middot; {$todayStats.totalMinutes} Min.</span>
+  </div>
+
+  <!-- Shortcut Hint -->
+  <div class="shortcut-hint">
+    <kbd>Strg+2</kbd> Fenster ein-/ausblenden
   </div>
 </div>
 
@@ -491,5 +510,22 @@
 
   .today-value {
     font-weight: 500;
+  }
+
+  .shortcut-hint {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+
+  .shortcut-hint kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-family: inherit;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
   }
 </style>

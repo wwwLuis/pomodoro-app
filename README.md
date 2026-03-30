@@ -59,9 +59,14 @@ A two-tone chime plays when a session completes (via Web Audio API). A native de
 
 Switch themes with a single button. Your preference is persisted and synced to the native title bar.
 
-### Global Shortcut
+### Global Shortcut & Window Toggle
 
-**`Ctrl + 2`** toggles the timer (start / pause / resume) — no matter which window currently has focus.
+**`Ctrl + 2`** works globally — no matter which window currently has focus:
+
+- **Toggles the timer** (start / pause / resume)
+- **Toggles window visibility** — if the app is visible and focused, it hides. Otherwise it pops up, unminimizes, and takes focus.
+
+When a session completes (focus or break), the window **automatically comes to the foreground** — even if it was hidden or minimized. This way you never miss a session transition.
 
 ### YouTube Music Player
 
@@ -170,10 +175,11 @@ All data is stored exclusively in the **localStorage** of the Tauri WebView — 
 |  +--------------------------------------+  |
 |  | Rust Backend                         |  |
 |  |                                      |  |
-|  |  Window Management                   |  |
+|  |  Window Management (show/hide/focus) |  |
 |  |  Global Shortcut (Ctrl+2)            |  |
 |  |  Desktop Notifications               |  |
 |  |  Native Title Bar & Theme Sync       |  |
+|  |  Google OAuth Flow                   |  |
 |  +--------------------------------------+  |
 +--------------------------------------------+
 ```
@@ -201,8 +207,10 @@ All data is stored exclusively in the **localStorage** of the Tauri WebView — 
 
 The Rust backend is intentionally minimal. It only handles tasks that a pure web frontend cannot:
 
-- **Global shortcut** (`Ctrl+2`): Registers system-wide and emits a `toggle-timer` event to the frontend
+- **Global shortcut** (`Ctrl+2`): Registers system-wide, toggles timer AND window visibility (show/hide/focus/unminimize), emits `toggle-timer` event to the frontend
+- **Window management**: Show, hide, unminimize, and focus the window — used by the shortcut handler and the frontend's session-complete callback
 - **Theme sync**: Sets the native title bar theme to match the app theme
+- **Google OAuth flow**: Spins up a temporary local HTTP server, opens the browser for Google consent, and captures the authorization code
 - **Plugin initialization**: Activates the `global-shortcut`, `notification`, and `opener` plugins on startup
 
 All business logic — timer management, task tracking, statistics — runs entirely in the frontend.
