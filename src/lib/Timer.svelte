@@ -2,7 +2,7 @@
   import { onMount, onDestroy, getContext } from "svelte";
   import { get } from "svelte/store";
   import type { Writable } from "svelte/store";
-  import { timer, settings, tasks, playCompletionSound, todayStats } from "./store";
+  import { timer, settings, tasks, playCompletionSound, todayStats, musicPlayerState, musicStatusMessage, skipSong } from "./store";
   import type { SessionType } from "./types";
 
   export let onGoTasks: () => void;
@@ -37,6 +37,9 @@
   $: activeTask = $tasks.find((t) => t.id === $timer.activeTaskId);
   $: sessionsBeforeLong = get(settings).sessionsBeforeLongBreak;
   $: sessionCounter = Math.ceil($timer.currentSession / 1);
+  $: musicActive = $musicPlayerState === "playing";
+  $: musicLoading = $musicPlayerState === "loading";
+  $: musicError = $musicPlayerState === "error";
 
   // Notifications
   async function notifyComplete(sessionType: SessionType) {
@@ -167,7 +170,18 @@
     </svg>
     <div class="timer-text">
       <span class="time-display">{timeDisplay}</span>
-      <span class="session-label">{typeLabels[$timer.sessionType]}</span>
+      <span class="session-label">
+        {typeLabels[$timer.sessionType]}
+        {#if musicActive}
+          <svg class="music-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+          </svg>
+        {:else if musicLoading}
+          <span class="music-loading-dot">⏳</span>
+        {:else if musicError}
+          <span class="music-error-dot" title={$musicStatusMessage}>⚠</span>
+        {/if}
+      </span>
     </div>
   </div>
 
@@ -204,6 +218,18 @@
       </svg>
     </button>
   </div>
+
+  <!-- Music Skip -->
+  {#if musicActive}
+    <button class="btn-skip-song" on:click={skipSong} title="Song überspringen">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+      </svg>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+      </svg>
+    </button>
+  {/if}
 
   <!-- Active Task -->
   <button class="active-task-card" on:click={onGoTasks}>
@@ -343,6 +369,30 @@
     font-size: 13px;
     font-weight: 500;
     color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .music-icon {
+    color: var(--accent);
+    animation: pulse-music 1.5s ease-in-out infinite;
+  }
+
+  .music-loading-dot {
+    font-size: 12px;
+    animation: pulse-music 1s ease-in-out infinite;
+  }
+
+  .music-error-dot {
+    font-size: 12px;
+    color: var(--accent);
+    cursor: help;
+  }
+
+  @keyframes pulse-music {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   /* Controls */
@@ -357,6 +407,27 @@
     padding: 12px 32px;
     font-size: 15px;
     gap: 8px;
+  }
+
+  .btn-skip-song {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 14px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 16px;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all var(--transition);
+    margin-bottom: 12px;
+  }
+
+  .btn-skip-song:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--bg-hover);
   }
 
   /* Active Task Card */

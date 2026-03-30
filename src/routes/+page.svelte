@@ -4,10 +4,17 @@
   import TaskList from "$lib/TaskList.svelte";
   import Statistics from "$lib/Statistics.svelte";
   import Settings from "$lib/Settings.svelte";
+  import YouTubePlayer from "$lib/YouTubePlayer.svelte";
+  import { settings } from "$lib/store";
 
   type View = "timer" | "tasks" | "stats" | "settings";
   let view: View = "timer";
 </script>
+
+<!-- YouTube Player lives outside the view switch so it persists -->
+{#if $settings.musicEnabled}
+  <YouTubePlayer />
+{/if}
 
 {#key view}
   <div in:fly={{ y: 14, duration: 220, delay: 80 }} out:fade={{ duration: 80 }}>

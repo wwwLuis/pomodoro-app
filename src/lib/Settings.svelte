@@ -1,7 +1,8 @@
 <script lang="ts">
   import { fly } from "svelte/transition";
-  import { settings, timer } from "./store";
+  import { settings, timer, musicPlayerState, musicStatusMessage } from "./store";
   import type { PomodoroSettings } from "./types";
+  import PlaylistPicker from "./PlaylistPicker.svelte";
 
   export let onBack: () => void;
 
@@ -148,6 +149,50 @@
       </div>
     </div>
   </div>
+
+  <!-- Musik -->
+  <div class="settings-group">
+    <span class="label">Musik</span>
+    <div class="settings-card">
+      <div class="setting-row">
+        <span class="setting-label">Musik während Fokus</span>
+        <button
+          class="toggle"
+          class:on={$settings.musicEnabled}
+          on:click={() => updateSetting("musicEnabled", !$settings.musicEnabled)}
+          aria-label="Musik während Fokus"
+        >
+          <span class="toggle-knob"></span>
+        </button>
+      </div>
+      {#if $settings.musicEnabled}
+        <div class="setting-row setting-row-col">
+          <div class="volume-row">
+            <span class="setting-label">Lautstärke</span>
+            <div class="volume-control">
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={$settings.musicVolume}
+                on:input={(e) => updateSetting("musicVolume", parseInt(e.currentTarget.value))}
+                class="volume-slider"
+              />
+              <span class="volume-value">{$settings.musicVolume}%</span>
+            </div>
+          </div>
+        </div>
+        <div class="setting-row setting-row-col">
+          <PlaylistPicker />
+        </div>
+      {/if}
+    </div>
+    {#if $settings.musicEnabled && $musicStatusMessage}
+      <div class="music-status" class:music-status-error={$musicPlayerState === "error"} class:music-status-playing={$musicPlayerState === "playing"}>
+        <span class="music-status-text">{$musicStatusMessage}</span>
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -262,5 +307,82 @@
 
   .toggle.on .toggle-knob {
     transform: translateX(20px);
+  }
+
+  .setting-row-col {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .volume-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .volume-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .volume-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 110px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    margin: 0;
+    padding: 0;
+  }
+
+  .volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    cursor: pointer;
+  }
+
+  .volume-value {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    width: 40px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .music-status {
+    padding: 6px 12px;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .music-status-error {
+    color: var(--accent);
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .music-status-playing {
+    color: var(--success);
+  }
+
+  .music-status-text {
+    line-height: 1.4;
   }
 </style>

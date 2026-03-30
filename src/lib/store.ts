@@ -1,12 +1,18 @@
 import { writable, derived, get } from "svelte/store";
 import type {
   PomodoroSettings,
+  GoogleAuth,
   Task,
   PomodoroSession,
   TimerState,
   SessionType,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+
+// Google OAuth Client credentials — loaded from .env file
+// See README for setup guide: https://console.cloud.google.com/
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
+const GOOGLE_CLIENT_SECRET = import.meta.env.VITE_GOOGLE_CLIENT_SECRET ?? "";
 
 /* ═══════════════════════════════════════════
    Utilities
@@ -484,4 +490,286 @@ export function playCompletionSound() {
     osc2.start(ctx.currentTime + 0.15);
     osc2.stop(ctx.currentTime + 0.65);
   } catch {}
+}
+
+/* ═══════════════════════════════════════════
+   Google Auth
+   ═══════════════════════════════════════════ */
+
+const AUTH_KEY = "pomo-google-auth";
+
+function loadAuth(): GoogleAuth | null {
+  try {
+    const raw = localStorage.getItem(AUTH_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveAuth(auth: GoogleAuth | null) {
+  try {
+    if (auth) {
+      localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+    } else {
+      localStorage.removeItem(AUTH_KEY);
+    }
+  } catch {}
+}
+
+function createGoogleAuthStore() {
+  const { subscribe, set, update } = writable<GoogleAuth | null>(loadAuth());
+
+  subscribe((a) => saveAuth(a));
+
+  async function refreshAccessToken(): Promise<string | null> {
+    const current = get({ subscribe });
+    if (!current?.refreshToken) return null;
+
+    try {
+      const res = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          refresh_token: current.refreshToken,
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          grant_type: "refresh_token",
+        }),
+      });
+
+      if (!res.ok) throw new Error("Refresh failed");
+      const data = await res.json();
+
+      update((a) =>
+        a
+          ? {
+              ...a,
+              accessToken: data.access_token,
+              expiresAt: Date.now() + data.expires_in * 1000,
+            }
+          : null
+      );
+      return data.access_token;
+    } catch {
+      set(null);
+      return null;
+    }
+  }
+
+  async function getValidToken(): Promise<string | null> {
+    const current = get({ subscribe });
+    if (!current) return null;
+    if (Date.now() < current.expiresAt - 60000) return current.accessToken;
+    return refreshAccessToken();
+  }
+
+  return {
+    subscribe,
+
+    async login() {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const resultStr = await invoke<string>("start_oauth_flow", {
+          clientId: GOOGLE_CLIENT_ID,
+        });
+        const { code, redirect_uri } = JSON.parse(resultStr);
+
+        // Exchange code for tokens
+        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            code,
+            client_id: GOOGLE_CLIENT_ID,
+            client_secret: GOOGLE_CLIENT_SECRET,
+            redirect_uri,
+            grant_type: "authorization_code",
+          }),
+        });
+
+        if (!tokenRes.ok) {
+          const errBody = await tokenRes.text();
+          console.error("Token exchange error:", tokenRes.status, errBody);
+          throw new Error("Token exchange failed");
+        }
+        const tokens = await tokenRes.json();
+
+        // Get user info
+        const userRes = await fetch(
+          "https://www.googleapis.com/oauth2/v2/userinfo",
+          { headers: { Authorization: `Bearer ${tokens.access_token}` } }
+        );
+        const userInfo = userRes.ok ? await userRes.json() : { name: "User" };
+
+        const auth: GoogleAuth = {
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token,
+          expiresAt: Date.now() + tokens.expires_in * 1000,
+          userName: userInfo.name || userInfo.email || "User",
+        };
+        set(auth);
+        return auth;
+      } catch (e) {
+        console.error("OAuth login failed:", e);
+        throw e;
+      }
+    },
+
+    logout() {
+      set(null);
+    },
+
+    refreshAccessToken,
+    getValidToken,
+
+    async fetchPlaylists(): Promise<
+      { id: string; title: string; thumbnail: string; itemCount: number }[]
+    > {
+      const token = await getValidToken();
+      if (!token) throw new Error("Nicht angemeldet");
+
+      const res = await fetch(
+        "https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&mine=true&maxResults=50",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) {
+        const errBody = await res.text();
+        console.error("Playlist API error:", res.status, errBody);
+        // Try to extract a meaningful error message
+        try {
+          const errJson = JSON.parse(errBody);
+          const msg = errJson?.error?.message || "API-Fehler";
+          const code = errJson?.error?.code || res.status;
+          throw new Error(`YouTube API Fehler (${code}): ${msg}`);
+        } catch (parseErr) {
+          if (parseErr instanceof Error && parseErr.message.startsWith("YouTube API"))
+            throw parseErr;
+          throw new Error(`YouTube API Fehler (${res.status})`);
+        }
+      }
+      const data = await res.json();
+
+      return (data.items || []).map((item: any) => ({
+        id: item.id,
+        title: item.snippet.title,
+        thumbnail:
+          item.snippet.thumbnails?.default?.url ||
+          item.snippet.thumbnails?.medium?.url ||
+          "",
+        itemCount: item.contentDetails?.itemCount || 0,
+      }));
+    },
+
+    /** Fetch all video IDs for a playlist via YouTube Data API v3 */
+    async fetchPlaylistVideoIds(playlistId: string): Promise<string[]> {
+      const token = await getValidToken();
+      if (!token) return [];
+
+      const videoIds: string[] = [];
+      let nextPageToken = "";
+
+      // Step 1: Collect all video IDs from the playlist
+      do {
+        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&playlistId=${playlistId}&maxResults=50${nextPageToken ? `&pageToken=${nextPageToken}` : ""}`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) return videoIds;
+
+        const data = await res.json();
+        for (const item of data.items || []) {
+          const videoId = item.contentDetails?.videoId;
+          if (videoId) videoIds.push(videoId);
+        }
+        nextPageToken = data.nextPageToken || "";
+      } while (nextPageToken && videoIds.length < 300);
+
+      if (videoIds.length === 0) return [];
+
+      // Step 2: Batch-verify via Videos API which IDs are actually
+      // playable (exist, public/unlisted, embeddable, fully processed).
+      // Deleted/private/blocked videos simply won't appear in the response.
+      const verified = new Set<string>();
+      for (let i = 0; i < videoIds.length; i += 50) {
+        const batch = videoIds.slice(i, i + 50);
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=id%2Cstatus&id=${batch.join(",")}`;
+        try {
+          const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          for (const item of data.items || []) {
+            const s = item.status;
+            if (
+              s?.uploadStatus === "processed" &&
+              s?.embeddable !== false &&
+              (s?.privacyStatus === "public" || s?.privacyStatus === "unlisted")
+            ) {
+              verified.add(item.id);
+            }
+          }
+        } catch {
+          // If verification fails for a batch, include them unverified
+          // rather than dropping potentially good videos
+          for (const id of batch) verified.add(id);
+        }
+      }
+
+      return videoIds.filter((id) => verified.has(id));
+    },
+  };
+}
+
+export const googleAuth = createGoogleAuthStore();
+export const isLoggedIn = derived(googleAuth, ($a) => $a !== null);
+
+/* ═══════════════════════════════════════════
+   YouTube Music Player
+   ═══════════════════════════════════════════ */
+
+export function extractPlaylistId(url: string): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const list = u.searchParams.get("list");
+    if (list) return list;
+  } catch {}
+  // Try bare ID (no URL)
+  if (/^PL[\w-]{16,}$/i.test(url)) return url;
+  return null;
+}
+
+export type MusicPlayerState = "idle" | "loading" | "playing" | "paused" | "error";
+
+export const musicPlayerState = writable<MusicPlayerState>("idle");
+
+/** Detailed music status message for UI feedback */
+export const musicStatusMessage = writable<string>("");
+
+/** Derived: should music be playing right now? */
+export const musicShouldPlay = derived(
+  [timer, settings],
+  ([$timer, $settings]) =>
+    $settings.musicEnabled &&
+    $timer.state === "running" &&
+    $timer.sessionType === "work" &&
+    ($settings.musicPlaylistId !== "" || $settings.musicPlaylistUrl !== "")
+);
+
+/** Callback for skip song — set by YouTubePlayer component */
+let skipSongCallback: (() => void) | null = null;
+
+export function registerSkipSong(cb: () => void) {
+  skipSongCallback = cb;
+}
+
+export function unregisterSkipSong() {
+  skipSongCallback = null;
+}
+
+export function skipSong() {
+  if (skipSongCallback) skipSongCallback();
 }

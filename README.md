@@ -63,6 +63,32 @@ Switch themes with a single button. Your preference is persisted and synced to t
 
 **`Ctrl + 2`** toggles the timer (start / pause / resume) — no matter which window currently has focus.
 
+### YouTube Music Player
+
+Play background music from your YouTube playlists during focus sessions. Music starts automatically when a focus session begins and pauses when the session ends or a break starts.
+
+**Features:**
+
+- **Google OAuth login** — Sign in with your Google account to browse and select your personal YouTube playlists
+- **Playlist picker** — Visual list of your playlists with thumbnails, titles, and video count
+- **URL fallback** — Paste any YouTube playlist URL as an alternative (no login required)
+- **Volume control** — Adjustable slider (0–100%)
+- **Shuffle mode** — Songs play in random order
+- **Skip song** — Jump to the next track
+- **Smart video filtering** — Deleted, private, and non-embeddable videos are automatically detected via the YouTube Videos API and excluded before playback
+- **Robust error handling** — Unplayable videos are skipped automatically with multiple retry strategies and fallback mechanisms
+- **Status feedback** — Real-time display of what's playing, loading state, and error messages
+
+**How it works under the hood:**
+
+1. On login, the app performs an OAuth 2.0 authorization flow via a Tauri plugin, exchanging the auth code for access/refresh tokens
+2. Playlists are fetched via the YouTube Data API v3 (`playlistItems` endpoint)
+3. Video IDs are batch-verified against the Videos API (`videos?part=id,status`) to filter out deleted, private, or non-embeddable entries
+4. A hidden YouTube IFrame player loads the verified video IDs and starts playback in shuffle mode
+5. If the video ID method fails, the player falls back to loading by playlist ID
+
+**Required setup:** You need your own Google OAuth client credentials (Client ID + Client Secret) from the [Google Cloud Console](https://console.cloud.google.com/). See the [Setup Guide](#google-oauth-setup) below.
+
 ---
 
 ## How Does It Work?
@@ -86,6 +112,7 @@ Switch themes with a single button. Your preference is persisted and synced to t
 | Timer Durations    |
 | Auto-Start         |
 | Sound / On-Top     |
+| Music / Playlists  |
 +--------------------+
 ```
 
@@ -112,10 +139,11 @@ All data is stored exclusively in the **localStorage** of the Tauri WebView — 
 
 | Key | Content |
 |-----|---------|
-| `pomo-settings` | Timer configuration (JSON) |
+| `pomo-settings` | Timer configuration incl. music preferences (JSON) |
 | `pomo-tasks` | All tasks (JSON) |
 | `pomo-sessions` | Completed sessions (JSON, max 500) |
 | `pomo-theme` | Active theme (`light` / `dark`) |
+| `pomo-google-auth` | Google OAuth tokens for YouTube access (JSON) |
 
 ---
 
@@ -159,7 +187,7 @@ All data is stored exclusively in the **localStorage** of the Tauri WebView — 
 | **TypeScript** | 5.6 | Type safety for interfaces, stores, and utility functions |
 | **Vite** | 6 | Lightning-fast dev server with HMR and optimized production builds |
 
-**State management** is handled through custom Svelte stores in `store.ts`. Each store (Settings, Tasks, Sessions, Timer) encapsulates load, save, and mutation logic, automatically persisting changes to localStorage. Derived stores like `todayStats` and `weekStats` reactively compute their values from the base stores.
+**State management** is handled through custom Svelte stores in `store.ts`. Each store (Settings, Tasks, Sessions, Timer, Google Auth, Music Player) encapsulates load, save, and mutation logic, automatically persisting changes to localStorage. Derived stores like `todayStats`, `weekStats`, and `musicShouldPlay` reactively compute their values from the base stores.
 
 **View routing** is controlled in `+page.svelte` via a simple state variable (`view: "timer" | "tasks" | "stats" | "settings"`) — no URL-based routing needed since the app is a single-window desktop tool.
 
@@ -200,11 +228,13 @@ pomodoro-app/
 │   │   └── +layout.ts            # SPA configuration (SSR disabled)
 │   ├── lib/                      # Components & state
 │   │   ├── types.ts              # TypeScript interfaces & defaults
-│   │   ├── store.ts              # Svelte stores, timer state machine, utilities
+│   │   ├── store.ts              # Svelte stores, timer state machine, Google Auth, utilities
 │   │   ├── Timer.svelte          # Circular countdown, controls, session pills
 │   │   ├── TaskList.svelte       # Task CRUD, progress tracking
 │   │   ├── Statistics.svelte     # Weekly bar chart, task breakdown
-│   │   └── Settings.svelte       # Configuration panel
+│   │   ├── Settings.svelte       # Configuration panel (incl. music settings)
+│   │   ├── YouTubePlayer.svelte  # Hidden YouTube IFrame player, playlist loading, error handling
+│   │   └── PlaylistPicker.svelte # Google login, playlist browser, URL input
 │   ├── app.css                   # Global styles (light/dark themes)
 │   └── app.html                  # HTML shell
 │
@@ -263,6 +293,58 @@ npm run tauri build
 npm run check         # One-time
 npm run check:watch   # Continuous
 ```
+
+---
+
+## Google OAuth Setup
+
+The YouTube Music Player requires Google OAuth credentials. These are **not included** in the repository — you need to create your own.
+
+### Step-by-Step
+
+1. **Go to the Google Cloud Console**
+   - Open [console.cloud.google.com](https://console.cloud.google.com/)
+   - Sign in with your Google account
+
+2. **Create a project** (or select an existing one)
+   - Click the project dropdown at the top left
+   - Click "New Project", give it a name (e.g. "Pomodoro Timer"), click "Create"
+
+3. **Enable the YouTube Data API v3**
+   - Go to "APIs & Services" > "Library"
+   - Search for "YouTube Data API v3"
+   - Click on it and hit "Enable"
+
+4. **Configure the OAuth consent screen**
+   - Go to "APIs & Services" > "OAuth consent screen"
+   - Choose "External" as user type
+   - Fill in the required fields (App name, User support email, Developer contact email)
+   - Under "Scopes", add: `https://www.googleapis.com/auth/youtube.readonly`
+   - Under "Test users", add your own Google email address
+   - Click through to finish
+
+5. **Create OAuth credentials**
+   - Go to "APIs & Services" > "Credentials"
+   - Click "Create Credentials" > "OAuth client ID"
+   - Application type: **Web application**
+   - Name: anything (e.g. "Pomodoro Timer")
+   - Authorized redirect URIs: add `http://localhost` (required for the Tauri OAuth flow)
+   - Click "Create"
+   - You'll see your **Client ID** and **Client Secret** — copy both
+
+6. **Add credentials to the project**
+   - Create a file `.env` in the `pomodoro-app/` root directory:
+
+   ```
+   VITE_GOOGLE_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
+   VITE_GOOGLE_CLIENT_SECRET=GOCSPX-your-secret-here
+   ```
+
+   - This file is in `.gitignore` and will not be committed
+
+7. **Done!** Start the app with `npm run tauri dev` and you can log in via Google in the Settings > Music section.
+
+> **Important:** Never commit your `.env` file or share your Client Secret publicly. If you accidentally expose it, go back to the Google Cloud Console and regenerate the credentials.
 
 ---
 

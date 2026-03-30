@@ -6,6 +6,18 @@ export interface PomodoroSettings {
   autoStartNext: boolean;
   soundEnabled: boolean;
   alwaysOnTop: boolean;
+  musicEnabled: boolean;
+  musicPlaylistUrl: string;
+  musicPlaylistId: string;
+  musicPlaylistName: string;
+  musicVolume: number;
+}
+
+export interface GoogleAuth {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  userName: string;
 }
 
 export interface Task {
@@ -37,4 +49,9 @@ export const DEFAULT_SETTINGS: PomodoroSettings = {
   autoStartNext: false,
   soundEnabled: true,
   alwaysOnTop: false,
+  musicEnabled: false,
+  musicPlaylistUrl: "",
+  musicPlaylistId: "",
+  musicPlaylistName: "",
+  musicVolume: 50,
 };

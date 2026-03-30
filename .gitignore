@@ -6,3 +6,6 @@ target/
 .vite/
 *.exe
 *.msi
+.env
+.env.local
+.env.*.local
