@@ -63,8 +63,7 @@ Switch themes with a single button. Your preference is persisted and synced to t
 
 **`Ctrl + 2`** works globally — no matter which window currently has focus:
 
-- **Toggles the timer** (start / pause / resume)
-- **Toggles window visibility** — if the app is visible and focused, it hides. Otherwise it pops up, unminimizes, and takes focus.
+- **Toggles window visibility** — if the app is visible, it hides. Otherwise it pops up, unminimizes, and takes focus.
 
 When a session completes (focus or break), the window **automatically comes to the foreground** — even if it was hidden or minimized. This way you never miss a session transition.
 
@@ -207,7 +206,7 @@ All data is stored exclusively in the **localStorage** of the Tauri WebView — 
 
 The Rust backend is intentionally minimal. It only handles tasks that a pure web frontend cannot:
 
-- **Global shortcut** (`Ctrl+2`): Registers system-wide, toggles timer AND window visibility (show/hide/focus/unminimize), emits `toggle-timer` event to the frontend
+- **Global shortcut** (`Ctrl+2`): Registers system-wide, toggles window visibility (show/hide/focus/unminimize)
 - **Window management**: Show, hide, unminimize, and focus the window — used by the shortcut handler and the frontend's session-complete callback
 - **Theme sync**: Sets the native title bar theme to match the app theme
 - **Google OAuth flow**: Spins up a temporary local HTTP server, opens the browser for Google consent, and captures the authorization code
