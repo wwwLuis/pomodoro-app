@@ -2,7 +2,7 @@
   import { onMount, onDestroy, getContext } from "svelte";
   import { get } from "svelte/store";
   import type { Writable } from "svelte/store";
-  import { timer, settings, tasks, playCompletionSound, todayStats, musicPlayerState, musicStatusMessage, skipSong } from "./store";
+  import { timer, settings, tasks, playCompletionSound, todayStats, musicPlayerState, musicStatusMessage, skipSong, toggleMusic, checkAndPerformAutoBackup } from "./store";
   import type { SessionType } from "./types";
 
   export let onGoTasks: () => void;
@@ -37,9 +37,16 @@
   $: activeTask = $tasks.find((t) => t.id === $timer.activeTaskId);
   $: sessionsBeforeLong = get(settings).sessionsBeforeLongBreak;
   $: sessionCounter = Math.ceil($timer.currentSession / 1);
+  // Session progress: which work session within the current cycle (1-based)
+  $: currentCycleSession = ((($timer.currentSession - 1) % sessionsBeforeLong) + 1);
+  // If currently in a break, the completed work sessions count = currentCycleSession - 1
+  // If in work, show currentCycleSession
+  $: sessionsCompletedInCycle = $timer.sessionType === "work" ? currentCycleSession - 1 :
+    ($timer.sessionType === "longBreak" ? sessionsBeforeLong : currentCycleSession - 1);
   $: musicActive = $musicPlayerState === "playing";
   $: musicLoading = $musicPlayerState === "loading";
   $: musicError = $musicPlayerState === "error";
+  $: musicControlsVisible = $settings.musicEnabled && ($settings.musicPlaylistId !== "" || $settings.musicPlaylistUrl !== "");
 
   // Bring window to front (even if hidden or minimized)
   async function bringWindowToFront() {
@@ -75,6 +82,11 @@
   }
 
   onMount(() => {
+    // Auto backup check on app start
+    checkAndPerformAutoBackup().then((path) => {
+      if (path) console.log("Auto-Backup erstellt:", path);
+    });
+
     timer.setOnComplete((sessionType: SessionType) => {
       const s = get(settings);
       if (s.soundEnabled) playCompletionSound();
@@ -100,9 +112,13 @@
   });
 
   function handleMainAction() {
-    if ($timer.state === "running") timer.pause();
-    else if ($timer.state === "paused") timer.resume();
-    else timer.start();
+    if ($timer.state === "running") {
+      timer.pause();
+    } else if ($timer.state === "paused") {
+      timer.resume();
+    } else {
+      timer.start();
+    }
   }
 
   function handleSessionTypeClick(type: SessionType) {
@@ -199,6 +215,21 @@
     </div>
   </div>
 
+  <!-- Session Progress Dots -->
+  <div class="session-dots">
+    {#each Array(sessionsBeforeLong) as _, i}
+      <span
+        class="dot"
+        class:dot-filled={i < sessionsCompletedInCycle}
+        class:dot-active={i === sessionsCompletedInCycle && $timer.sessionType === "work"}
+        title="Session {i + 1}/{sessionsBeforeLong}"
+      ></span>
+    {/each}
+    <span class="dots-label">
+      {sessionsCompletedInCycle}/{sessionsBeforeLong} bis Lange Pause
+    </span>
+  </div>
+
   <!-- Controls -->
   <div class="controls">
     <button class="btn-secondary" on:click={() => timer.reset()} title="Zurücksetzen">
@@ -233,16 +264,28 @@
     </button>
   </div>
 
-  <!-- Music Skip -->
-  {#if musicActive}
-    <button class="btn-skip-song" on:click={skipSong} title="Song überspringen">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
-      </svg>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
-      </svg>
-    </button>
+  <!-- Music Controls -->
+  {#if musicControlsVisible}
+    <div class="music-controls">
+      <button class="btn-music-control" on:click={toggleMusic} title={musicActive ? "Musik pausieren" : "Musik fortsetzen"}>
+        {#if musicActive}
+          <!-- Pause icon -->
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>
+          </svg>
+        {:else}
+          <!-- Play icon -->
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+        {/if}
+      </button>
+      <button class="btn-music-control" on:click={skipSong} title="Song überspringen">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>
+        </svg>
+      </button>
+    </div>
   {/if}
 
   <!-- Active Task -->
@@ -426,24 +469,73 @@
     padding: 12px 32px;
     font-size: 15px;
     gap: 8px;
+    width: 140px;
   }
 
-  .btn-skip-song {
+  /* Session Progress Dots */
+  .session-dots {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 6px 14px;
-    background: var(--bg-card);
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border-light);
     border: 1.5px solid var(--border);
-    border-radius: 16px;
-    color: var(--text-muted);
-    font-size: 12px;
-    cursor: pointer;
     transition: all var(--transition);
+  }
+
+  .dot-filled {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .dot-active {
+    background: transparent;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-bg);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { box-shadow: 0 0 0 2px var(--accent-bg); }
+    50% { box-shadow: 0 0 0 4px var(--accent-bg); }
+  }
+
+  .dots-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-left: 4px;
+  }
+
+  /* Music Controls */
+  .music-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin-bottom: 12px;
   }
 
-  .btn-skip-song:hover {
+  .btn-music-control {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    background: var(--bg-card);
+    border: 1.5px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition);
+  }
+
+  .btn-music-control:hover {
     border-color: var(--accent);
     color: var(--accent);
     background: var(--bg-hover);

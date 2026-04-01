@@ -1,8 +1,54 @@
 <script lang="ts">
   import { fly } from "svelte/transition";
-  import { settings, timer, musicPlayerState, musicStatusMessage } from "./store";
+  import { settings, timer, musicPlayerState, musicStatusMessage, performBackup, importBackupFromFile } from "./store";
   import type { PomodoroSettings } from "./types";
   import PlaylistPicker from "./PlaylistPicker.svelte";
+
+  let backupStatus = "";
+  let importStatus = "";
+
+  async function handlePickBackupFolder() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, multiple: false, title: "Backup-Ordner wählen" });
+      if (selected && typeof selected === "string") {
+        updateSetting("backupPath", selected);
+      }
+    } catch (e) {
+      console.error("Folder picker failed:", e);
+    }
+  }
+
+  async function handleManualBackup() {
+    backupStatus = "Erstelle Backup...";
+    const path = await performBackup();
+    if (path) {
+      backupStatus = `Backup erstellt: ${path.split(/[\\/]/).pop()}`;
+    } else {
+      backupStatus = "Backup fehlgeschlagen — Ordner prüfen.";
+    }
+    setTimeout(() => (backupStatus = ""), 5000);
+  }
+
+  async function handleImportBackup() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        multiple: false,
+        title: "Backup importieren",
+      });
+      if (selected && typeof selected === "string") {
+        importStatus = "Importiere...";
+        const success = await importBackupFromFile(selected);
+        importStatus = success ? "Import erfolgreich!" : "Import fehlgeschlagen.";
+        setTimeout(() => (importStatus = ""), 5000);
+      }
+    } catch (e) {
+      importStatus = "Import fehlgeschlagen.";
+      setTimeout(() => (importStatus = ""), 5000);
+    }
+  }
 
   export let onBack: () => void;
 
@@ -192,6 +238,54 @@
         <span class="music-status-text">{$musicStatusMessage}</span>
       </div>
     {/if}
+  </div>
+
+  <!-- Backup -->
+  <div class="settings-group">
+    <span class="label">Backup</span>
+    <div class="settings-card">
+      <div class="setting-row">
+        <div class="setting-label-group">
+          <span class="setting-label">Automatisches Wochen-Backup</span>
+          <span class="setting-hint">Prüft beim Start ob ein Backup diese Woche nötig ist</span>
+        </div>
+        <button
+          class="toggle"
+          class:on={$settings.backupEnabled}
+          on:click={() => updateSetting("backupEnabled", !$settings.backupEnabled)}
+          aria-label="Automatisches Backup"
+        >
+          <span class="toggle-knob"></span>
+        </button>
+      </div>
+      {#if $settings.backupEnabled}
+        <div class="setting-row setting-row-col">
+          <span class="setting-label">Backup-Ordner</span>
+          <div class="backup-folder-row">
+            <span class="backup-path" title={$settings.backupPath || "Nicht gesetzt"}>
+              {$settings.backupPath ? $settings.backupPath.split(/[\\/]/).slice(-2).join("/") : "Ordner wählen..."}
+            </span>
+            <button class="btn-secondary btn-sm" on:click={handlePickBackupFolder}>
+              Ändern
+            </button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <button class="btn-secondary btn-sm" on:click={handleManualBackup} disabled={!$settings.backupPath}>
+            Jetzt sichern
+          </button>
+          <button class="btn-secondary btn-sm" on:click={handleImportBackup}>
+            Backup importieren
+          </button>
+        </div>
+        {#if backupStatus}
+          <div class="backup-status">{backupStatus}</div>
+        {/if}
+        {#if importStatus}
+          <div class="backup-status">{importStatus}</div>
+        {/if}
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -384,5 +478,48 @@
 
   .music-status-text {
     line-height: 1.4;
+  }
+
+  /* Setting label with hint */
+  .setting-label-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .setting-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  /* Backup */
+  .backup-folder-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 8px;
+    margin-top: 6px;
+  }
+
+  .backup-path {
+    font-size: 12px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .backup-status {
+    padding: 6px 18px 12px;
+    font-size: 12px;
+    color: var(--text-muted);
   }
 </style>

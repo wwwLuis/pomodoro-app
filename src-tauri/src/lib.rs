@@ -2,9 +2,10 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::Duration;
 use tauri::image::Image;
-use tauri::{Manager};
+use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 use url::Url;
+use chrono::{Local, Datelike};
 
 /// Starts a temporary local HTTP server, opens the Google OAuth consent screen,
 /// and returns the authorization code from the callback.
@@ -110,6 +111,62 @@ fn urlencoding(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
+/// Export backup data to a JSON file in the specified folder.
+#[tauri::command]
+async fn export_backup(data: String, folder_path: String) -> Result<String, String> {
+    let now = Local::now();
+    let filename = format!("pomodoro-backup-{}.json", now.format("%Y-%m-%d_%H-%M-%S"));
+    let full_path = std::path::Path::new(&folder_path).join(&filename);
+
+    // Ensure the folder exists
+    std::fs::create_dir_all(&folder_path)
+        .map_err(|e| format!("Ordner konnte nicht erstellt werden: {}", e))?;
+
+    std::fs::write(&full_path, &data)
+        .map_err(|e| format!("Backup konnte nicht geschrieben werden: {}", e))?;
+
+    Ok(full_path.to_string_lossy().to_string())
+}
+
+/// Import backup data from a JSON file.
+#[tauri::command]
+async fn import_backup(file_path: String) -> Result<String, String> {
+    std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Backup konnte nicht gelesen werden: {}", e))
+}
+
+/// Check if a backup was already created this week in the specified folder.
+/// Returns true if a backup is needed (no backup this week).
+#[tauri::command]
+async fn check_backup_needed(folder_path: String) -> Result<bool, String> {
+    let folder = std::path::Path::new(&folder_path);
+    if !folder.exists() {
+        return Ok(true);
+    }
+
+    let now = Local::now();
+    let monday = now.date_naive() - chrono::Duration::days(now.weekday().num_days_from_monday() as i64);
+
+    let entries = std::fs::read_dir(folder)
+        .map_err(|e| format!("Ordner konnte nicht gelesen werden: {}", e))?;
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with("pomodoro-backup-") && name.ends_with(".json") {
+            // Extract date from filename: pomodoro-backup-YYYY-MM-DD_HH-MM-SS.json
+            if let Some(date_str) = name.strip_prefix("pomodoro-backup-").and_then(|s| s.get(..10)) {
+                if let Ok(file_date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                    if file_date >= monday {
+                        return Ok(false); // Backup exists this week
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(true) // No backup found this week
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shortcut = Shortcut::new(Some(Modifiers::CONTROL), Code::Digit2);
@@ -141,7 +198,8 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![start_oauth_flow])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![start_oauth_flow, export_backup, import_backup, check_backup_needed])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(img) = Image::from_bytes(include_bytes!("../icons/icon.png")) {

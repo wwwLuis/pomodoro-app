@@ -3,6 +3,7 @@
   import { sessions, todayStats, weekStats, tasks } from "./store";
 
   export let onBack: () => void;
+  export let onGoExtended: () => void;
 
   const dayLabels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 
@@ -116,6 +117,19 @@
       </div>
     </div>
   {/if}
+
+  <!-- Extended Stats Link -->
+  <div class="extended-link-section">
+    <button class="btn-extended" on:click={onGoExtended}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+      Erweiterte Statistiken
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
+    </button>
+  </div>
 
   <!-- Clear History -->
   {#if $sessions.length > 0}
@@ -311,6 +325,35 @@
     border-radius: 3px;
     transition: width var(--transition);
     min-width: 4px;
+  }
+
+  /* Extended Stats Link */
+  .extended-link-section {
+    margin-bottom: 16px;
+  }
+
+  .btn-extended {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border: 1.5px solid var(--accent-border);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    transition: all var(--transition);
+  }
+
+  .btn-extended:hover {
+    background: var(--accent);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.25);
   }
 
   /* Clear */

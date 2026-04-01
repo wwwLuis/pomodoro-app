@@ -773,3 +773,209 @@ export function unregisterSkipSong() {
 export function skipSong() {
   if (skipSongCallback) skipSongCallback();
 }
+
+/** Callback for pause/resume music — set by YouTubePlayer component */
+let toggleMusicCallback: (() => void) | null = null;
+
+export function registerToggleMusic(cb: () => void) {
+  toggleMusicCallback = cb;
+}
+
+export function unregisterToggleMusic() {
+  toggleMusicCallback = null;
+}
+
+export function toggleMusic() {
+  if (toggleMusicCallback) toggleMusicCallback();
+}
+
+/* ═══════════════════════════════════════════
+   Backup
+   ═══════════════════════════════════════════ */
+
+export async function performBackup(): Promise<string | null> {
+  const s = get(settings);
+  if (!s.backupEnabled || !s.backupPath) return null;
+
+  const data = {
+    exportedAt: Date.now(),
+    settings: s,
+    sessions: get(sessions),
+    tasks: get(tasks),
+  };
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const path = await invoke<string>("export_backup", {
+      data: JSON.stringify(data, null, 2),
+      folderPath: s.backupPath,
+    });
+    return path;
+  } catch (e) {
+    console.error("Backup failed:", e);
+    return null;
+  }
+}
+
+export async function checkAndPerformAutoBackup(): Promise<string | null> {
+  const s = get(settings);
+  if (!s.backupEnabled || !s.backupPath) return null;
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const needed = await invoke<boolean>("check_backup_needed", {
+      folderPath: s.backupPath,
+    });
+    if (needed) {
+      return performBackup();
+    }
+  } catch (e) {
+    console.error("Auto backup check failed:", e);
+  }
+  return null;
+}
+
+export async function importBackupFromFile(filePath: string): Promise<boolean> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const raw = await invoke<string>("import_backup", { filePath });
+    const data = JSON.parse(raw);
+
+    if (data.sessions && Array.isArray(data.sessions)) {
+      // Merge sessions (avoid duplicates by id)
+      const existing = get(sessions);
+      const existingIds = new Set(existing.map((s) => s.id));
+      const newSessions = data.sessions.filter((s: any) => !existingIds.has(s.id));
+      const merged = [...newSessions, ...existing].slice(0, SESSIONS_MAX);
+      sessions.clear();
+      for (const s of merged.reverse()) {
+        sessions.record(s);
+      }
+    }
+
+    if (data.tasks && Array.isArray(data.tasks)) {
+      // Merge tasks (avoid duplicates by id)
+      const existing = get(tasks);
+      const existingIds = new Set(existing.map((t) => t.id));
+      for (const t of data.tasks) {
+        if (!existingIds.has(t.id)) {
+          tasks.add(t.name, t.targetPomodoros);
+        }
+      }
+    }
+
+    return true;
+  } catch (e) {
+    console.error("Import failed:", e);
+    return false;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   Extended Statistics (All-time, Monthly, Streaks)
+   ═══════════════════════════════════════════ */
+
+export const allTimeStats = derived(sessions, ($ss) => {
+  const work = $ss.filter((s) => s.type === "work");
+  const totalMinutes = Math.round(work.reduce((sum, s) => sum + s.duration, 0) / 60);
+  const totalCount = work.length;
+
+  // Streak: consecutive days with at least 1 work session
+  const daySet = new Set<string>();
+  for (const s of work) {
+    const d = new Date(s.completedAt);
+    daySet.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  }
+  const sortedDays = [...daySet].sort().reverse();
+
+  let currentStreak = 0;
+  let longestStreak = 0;
+  let tempStreak = 0;
+
+  // Calculate current streak from today backwards
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let checkDate = new Date(today);
+
+  for (let i = 0; i < 365; i++) {
+    const key = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
+    if (daySet.has(key)) {
+      currentStreak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else if (i === 0) {
+      // Today has no session yet — check yesterday
+      checkDate.setDate(checkDate.getDate() - 1);
+      continue;
+    } else {
+      break;
+    }
+  }
+
+  // Calculate longest streak ever
+  for (let i = 0; i < sortedDays.length; i++) {
+    if (i === 0) {
+      tempStreak = 1;
+    } else {
+      const prev = new Date(sortedDays[i - 1]);
+      const curr = new Date(sortedDays[i]);
+      const diffDays = Math.round((prev.getTime() - curr.getTime()) / 86400000);
+      if (diffDays === 1) {
+        tempStreak++;
+      } else {
+        tempStreak = 1;
+      }
+    }
+    longestStreak = Math.max(longestStreak, tempStreak);
+  }
+
+  // Best day
+  const dayCountMap = new Map<string, number>();
+  for (const s of work) {
+    const d = new Date(s.completedAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    dayCountMap.set(key, (dayCountMap.get(key) || 0) + 1);
+  }
+  let bestDayDate = "";
+  let bestDayCount = 0;
+  for (const [date, count] of dayCountMap) {
+    if (count > bestDayCount) {
+      bestDayCount = count;
+      bestDayDate = date;
+    }
+  }
+
+  // Monthly breakdown (last 6 months)
+  const months: { label: string; count: number; minutes: number }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
+    const monthSessions = work.filter(
+      (s) => s.completedAt >= monthDate.getTime() && s.completedAt <= monthEnd.getTime()
+    );
+    const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+    months.push({
+      label: `${monthNames[monthDate.getMonth()]} ${monthDate.getFullYear()}`,
+      count: monthSessions.length,
+      minutes: Math.round(monthSessions.reduce((sum, s) => sum + s.duration, 0) / 60),
+    });
+  }
+  months.reverse();
+
+  // Average pomodoros per active day
+  const activeDays = daySet.size;
+  const avgPerDay = activeDays > 0 ? Math.round((totalCount / activeDays) * 10) / 10 : 0;
+
+  return {
+    totalCount,
+    totalMinutes,
+    totalHours: Math.round(totalMinutes / 60 * 10) / 10,
+    currentStreak,
+    longestStreak,
+    bestDayDate,
+    bestDayCount,
+    activeDays,
+    avgPerDay,
+    months,
+  };
+});

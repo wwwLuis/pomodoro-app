@@ -11,6 +11,8 @@ export interface PomodoroSettings {
   musicPlaylistId: string;
   musicPlaylistName: string;
   musicVolume: number;
+  backupEnabled: boolean;
+  backupPath: string;
 }
 
 export interface GoogleAuth {
@@ -54,4 +56,6 @@ export const DEFAULT_SETTINGS: PomodoroSettings = {
   musicPlaylistId: "",
   musicPlaylistName: "",
   musicVolume: 50,
+  backupEnabled: false,
+  backupPath: "",
 };

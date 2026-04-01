@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { settings, musicShouldPlay, musicPlayerState, musicStatusMessage, extractPlaylistId, registerSkipSong, unregisterSkipSong, googleAuth, isLoggedIn } from "./store";
+  import { settings, musicShouldPlay, musicPlayerState, musicStatusMessage, extractPlaylistId, registerSkipSong, unregisterSkipSong, registerToggleMusic, unregisterToggleMusic, googleAuth, isLoggedIn } from "./store";
   import { get } from "svelte/store";
 
   let playerElement: HTMLDivElement;
@@ -20,6 +20,7 @@
   let cuedRetryCount = 0;
   let loadRetryCount = 0;
   let loadingTimeout: ReturnType<typeof setTimeout> | null = null;
+  let userToggleUntil = 0;
 
   const ERROR_NAMES: Record<number, string> = {
     2: "Ungültiger Parameter",
@@ -75,7 +76,9 @@
       const state = player.getPlayerState();
       if (state === 2) {
         player.playVideo();
+        musicPlayerState.set("playing");
         setStatus("Fortsetzen...");
+        userToggleUntil = Date.now() + 2000;
       } else if (state === -1 || state === 0 || state === 5) {
         doLoadPlaylist(desiredId);
       } else if (state !== 1 && state !== 3) {
@@ -221,6 +224,13 @@
     if (pendingPlaylistId && !playlistLoadStarted) {
       return;
     }
+
+    // After a manual play/pause toggle, ignore intermediate YouTube events
+    // (buffering, brief paused) so the UI doesn't flicker.
+    if (userToggleUntil > Date.now() && state !== 1) {
+      return;
+    }
+    userToggleUntil = 0;
 
     switch (state) {
       case 1: { // playing
@@ -411,6 +421,35 @@
     } catch {}
   }
 
+  let toggleDebounce = 0;
+
+  function handleToggleMusic() {
+    if (!player || !apiReady) return;
+    const now = Date.now();
+    if (now - toggleDebounce < 400) return;
+    toggleDebounce = now;
+
+    try {
+      const state = player.getPlayerState();
+      if (state === 1 || state === 3) {
+        // playing or buffering → pause
+        player.pauseVideo();
+        musicPlayerState.set("paused");
+        setStatus("Pausiert");
+        userToggleUntil = 0;
+      } else {
+        // paused, cued, ended, unstarted → play
+        player.playVideo();
+        musicPlayerState.set("playing");
+        setStatus("Fortsetzen...");
+        userToggleUntil = now + 2000;
+      }
+    } catch {
+      // Player in broken state — try to recover
+      try { player.playVideo(); } catch {}
+    }
+  }
+
   function loadYouTubeAPI(): Promise<void> {
     return new Promise((resolve) => {
       if ((window as any).YT && (window as any).YT.Player) {
@@ -462,6 +501,7 @@
 
   onMount(async () => {
     registerSkipSong(handleSkipSong);
+    registerToggleMusic(handleToggleMusic);
     setStatus("YouTube API wird geladen...");
     try {
       await loadYouTubeAPI();
@@ -475,6 +515,7 @@
   onDestroy(() => {
     clearLoadingTimeout();
     unregisterSkipSong();
+    unregisterToggleMusic();
     try {
       if (player && typeof player.destroy === "function") {
         player.destroy();
