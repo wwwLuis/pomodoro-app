@@ -43,6 +43,17 @@ export interface PomodoroSession {
 export type TimerState = "idle" | "running" | "paused";
 export type SessionType = "work" | "shortBreak" | "longBreak";
 
+export interface SessionPlanStep {
+  type: SessionType;
+  durationMinutes: number;
+}
+
+export interface SessionPlan {
+  id: string;
+  name: string;
+  steps: SessionPlanStep[];
+}
+
 export const DEFAULT_SETTINGS: PomodoroSettings = {
   workDuration: 25,
   shortBreakDuration: 5,

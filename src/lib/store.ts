@@ -6,6 +6,8 @@ import type {
   PomodoroSession,
   TimerState,
   SessionType,
+  SessionPlan,
+  SessionPlanStep,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
@@ -134,7 +136,7 @@ export const tasks = createTaskStore();
    ═══════════════════════════════════════════ */
 
 const SESSIONS_KEY = "pomo-sessions";
-const SESSIONS_MAX = 500;
+const SESSIONS_MAX = 10000;
 
 function loadSessions(): PomodoroSession[] {
   try {
@@ -270,6 +272,9 @@ function createTimerStore() {
 
   // Callbacks set by Timer.svelte
   let onComplete: ((sessionType: SessionType) => void) | null = null;
+  // Callback for plan-aware next-session logic (set after activePlan is defined)
+  // Returns: next step info, or { planFinished: true } when a plan just ended, or null if no plan active
+  let onPlanNext: (() => { type: SessionType; seconds: number; autoStart: boolean } | { planFinished: true } | null) | null = null;
 
   function clearTimer() {
     if (intervalId !== null) {
@@ -302,7 +307,52 @@ function createTimerStore() {
           tasks.incrementPomodoro(t.activeTaskId);
         }
 
-        // Determine next session
+        // Fire callback
+        if (onComplete) onComplete(completedType);
+
+        // Check if a session plan is active
+        const planNext = onPlanNext ? onPlanNext() : null;
+        if (planNext) {
+          // Plan just finished — reset to fresh start (like opening the app)
+          if ("planFinished" in planNext) {
+            const freshSeconds = getDurationSeconds("work", get(settings));
+            return {
+              ...t,
+              state: "idle" as TimerState,
+              sessionType: "work" as SessionType,
+              remainingSeconds: freshSeconds,
+              totalSeconds: freshSeconds,
+              currentSession: 1,
+            };
+          }
+
+          const { type: nextType, seconds: nextSeconds, autoStart } = planNext;
+          const nextSession = completedType === "work" ? t.currentSession + 1 : t.currentSession;
+
+          if (autoStart) {
+            targetEndTime = Date.now() + nextSeconds * 1000;
+            intervalId = setInterval(tick, 250);
+            return {
+              ...t,
+              state: "running" as TimerState,
+              sessionType: nextType,
+              remainingSeconds: nextSeconds,
+              totalSeconds: nextSeconds,
+              currentSession: nextSession,
+            };
+          }
+
+          return {
+            ...t,
+            state: "idle" as TimerState,
+            sessionType: nextType,
+            remainingSeconds: nextSeconds,
+            totalSeconds: nextSeconds,
+            currentSession: nextSession,
+          };
+        }
+
+        // Default: determine next session from settings
         let nextSession = t.currentSession;
         let nextType: SessionType;
 
@@ -319,9 +369,6 @@ function createTimerStore() {
 
         const nextSettings = get(settings);
         const nextSeconds = getDurationSeconds(nextType, nextSettings);
-
-        // Fire callback
-        if (onComplete) onComplete(completedType);
 
         // Auto-start or idle
         if (nextSettings.autoStartNext) {
@@ -358,6 +405,10 @@ function createTimerStore() {
       onComplete = cb;
     },
 
+    setOnPlanNext(cb: (() => { type: SessionType; seconds: number; autoStart: boolean } | { planFinished: true } | null) | null) {
+      onPlanNext = cb;
+    },
+
     start() {
       const current = get({ subscribe });
       targetEndTime = Date.now() + current.remainingSeconds * 1000;
@@ -387,18 +438,49 @@ function createTimerStore() {
     reset() {
       clearTimer();
       const current = get({ subscribe });
-      const s = get(settings);
-      const seconds = getDurationSeconds(current.sessionType, s);
+      // If the totalSeconds was set by a plan, reset to that; otherwise use settings
+      const seconds = current.totalSeconds;
       update((t) => ({
         ...t,
         state: "idle",
         remainingSeconds: seconds,
-        totalSeconds: seconds,
       }));
     },
 
     skipToNext() {
       clearTimer();
+
+      // Check if a session plan is active — let the plan decide the next step
+      const planNext = onPlanNext ? onPlanNext() : null;
+      if (planNext) {
+        // Plan just finished — reset to fresh start
+        if ("planFinished" in planNext) {
+          const freshSeconds = getDurationSeconds("work", get(settings));
+          update((t) => ({
+            ...t,
+            state: "idle",
+            sessionType: "work" as SessionType,
+            remainingSeconds: freshSeconds,
+            totalSeconds: freshSeconds,
+            currentSession: 1,
+          }));
+          return;
+        }
+
+        const current = get({ subscribe });
+        const nextSession = current.sessionType === "work" ? current.currentSession + 1 : current.currentSession;
+        update((t) => ({
+          ...t,
+          state: "idle",
+          sessionType: planNext.type,
+          remainingSeconds: planNext.seconds,
+          totalSeconds: planNext.seconds,
+          currentSession: nextSession,
+        }));
+        return;
+      }
+
+      // Default: standard session sequence
       const current = get({ subscribe });
       const s = get(settings);
 
@@ -444,6 +526,17 @@ function createTimerStore() {
       }));
     },
 
+    /** Set a custom duration in seconds (used by session planner) */
+    setCustomDuration(seconds: number) {
+      clearTimer();
+      update((t) => ({
+        ...t,
+        state: "idle" as TimerState,
+        remainingSeconds: seconds,
+        totalSeconds: seconds,
+      }));
+    },
+
     /** Refresh durations when settings change (only if idle) */
     refreshDuration() {
       const current = get({ subscribe });
@@ -460,6 +553,126 @@ function createTimerStore() {
 }
 
 export const timer = createTimerStore();
+
+/* ═══════════════════════════════════════════
+   Session Plans
+   ═══════════════════════════════════════════ */
+
+const PLANS_KEY = "pomo-session-plans";
+
+function loadPlans(): SessionPlan[] {
+  try {
+    const raw = localStorage.getItem(PLANS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function createSessionPlanStore() {
+  const { subscribe, set, update } = writable<SessionPlan[]>(loadPlans());
+
+  subscribe((plans) => {
+    try {
+      localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
+    } catch {}
+  });
+
+  return {
+    subscribe,
+
+    add(plan: Omit<SessionPlan, "id">) {
+      update((plans) => [
+        ...plans,
+        { ...plan, id: genId() },
+      ]);
+    },
+
+    remove(id: string) {
+      update((plans) => plans.filter((p) => p.id !== id));
+    },
+
+    update(id: string, partial: Partial<Omit<SessionPlan, "id">>) {
+      update((plans) =>
+        plans.map((p) => (p.id === id ? { ...p, ...partial } : p))
+      );
+    },
+  };
+}
+
+export const sessionPlans = createSessionPlanStore();
+
+/** Active plan execution state */
+export interface ActivePlanState {
+  planId: string;
+  planName: string;
+  steps: SessionPlanStep[];
+  currentStepIndex: number;
+}
+
+export const activePlan = writable<ActivePlanState | null>(null);
+
+/** Start executing a session plan */
+export function startPlan(plan: SessionPlan) {
+  if (plan.steps.length === 0) return;
+
+  const firstStep = plan.steps[0];
+  activePlan.set({
+    planId: plan.id,
+    planName: plan.name,
+    steps: plan.steps,
+    currentStepIndex: 0,
+  });
+
+  // Set the timer to the first step
+  timer.setSessionType(firstStep.type);
+  // Override the duration for this plan step
+  timer.setCustomDuration(firstStep.durationMinutes * 60);
+}
+
+/** Advance to the next step in the active plan. Returns false if plan is complete. */
+export function advancePlan(): boolean {
+  const plan = get(activePlan);
+  if (!plan) return false;
+
+  const nextIndex = plan.currentStepIndex + 1;
+  if (nextIndex >= plan.steps.length) {
+    activePlan.set(null);
+    return false;
+  }
+
+  const nextStep = plan.steps[nextIndex];
+  activePlan.update((p) => p ? { ...p, currentStepIndex: nextIndex } : null);
+  timer.setSessionType(nextStep.type);
+  timer.setCustomDuration(nextStep.durationMinutes * 60);
+  return true;
+}
+
+/** Stop the active plan */
+export function stopPlan() {
+  activePlan.set(null);
+}
+
+// Wire up plan-aware next-session logic into the timer
+timer.setOnPlanNext(() => {
+  const plan = get(activePlan);
+  if (!plan) return null;
+
+  const nextIndex = plan.currentStepIndex + 1;
+  if (nextIndex >= plan.steps.length) {
+    // Plan is complete — signal finished so timer resets to 0:00
+    activePlan.set(null);
+    return { planFinished: true };
+  }
+
+  const nextStep = plan.steps[nextIndex];
+  activePlan.update((p) => p ? { ...p, currentStepIndex: nextIndex } : null);
+  return {
+    type: nextStep.type,
+    seconds: nextStep.durationMinutes * 60,
+    autoStart: get(settings).autoStartNext,
+  };
+});
 
 /* ═══════════════════════════════════════════
    Sound
@@ -817,6 +1030,21 @@ export async function performBackup(): Promise<string | null> {
   }
 }
 
+/** Set the default backup path to <exe-dir>/backup if not already configured */
+export async function initDefaultBackupPath(): Promise<void> {
+  const s = get(settings);
+  if (s.backupPath) return; // already configured
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const exeDir = await invoke<string>("get_exe_dir");
+    const defaultPath = exeDir.replace(/\\/g, "/") + "/backup";
+    settings.update({ backupPath: defaultPath });
+  } catch (e) {
+    console.error("Could not set default backup path:", e);
+  }
+}
+
 export async function checkAndPerformAutoBackup(): Promise<string | null> {
   const s = get(settings);
   if (!s.backupEnabled || !s.backupPath) return null;
@@ -872,7 +1100,7 @@ export async function importBackupFromFile(filePath: string): Promise<boolean> {
 }
 
 /* ═══════════════════════════════════════════
-   Extended Statistics (All-time, Monthly, Streaks)
+   Extended Statistics (All-time, Filterable)
    ═══════════════════════════════════════════ */
 
 export const allTimeStats = derived(sessions, ($ss) => {
@@ -880,53 +1108,14 @@ export const allTimeStats = derived(sessions, ($ss) => {
   const totalMinutes = Math.round(work.reduce((sum, s) => sum + s.duration, 0) / 60);
   const totalCount = work.length;
 
-  // Streak: consecutive days with at least 1 work session
+  // Active days
   const daySet = new Set<string>();
   for (const s of work) {
     const d = new Date(s.completedAt);
     daySet.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
   }
-  const sortedDays = [...daySet].sort().reverse();
-
-  let currentStreak = 0;
-  let longestStreak = 0;
-  let tempStreak = 0;
-
-  // Calculate current streak from today backwards
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  let checkDate = new Date(today);
-
-  for (let i = 0; i < 365; i++) {
-    const key = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
-    if (daySet.has(key)) {
-      currentStreak++;
-      checkDate.setDate(checkDate.getDate() - 1);
-    } else if (i === 0) {
-      // Today has no session yet — check yesterday
-      checkDate.setDate(checkDate.getDate() - 1);
-      continue;
-    } else {
-      break;
-    }
-  }
-
-  // Calculate longest streak ever
-  for (let i = 0; i < sortedDays.length; i++) {
-    if (i === 0) {
-      tempStreak = 1;
-    } else {
-      const prev = new Date(sortedDays[i - 1]);
-      const curr = new Date(sortedDays[i]);
-      const diffDays = Math.round((prev.getTime() - curr.getTime()) / 86400000);
-      if (diffDays === 1) {
-        tempStreak++;
-      } else {
-        tempStreak = 1;
-      }
-    }
-    longestStreak = Math.max(longestStreak, tempStreak);
-  }
+  const activeDays = daySet.size;
+  const avgPerDay = activeDays > 0 ? Math.round((totalCount / activeDays) * 10) / 10 : 0;
 
   // Best day
   const dayCountMap = new Map<string, number>();
@@ -944,38 +1133,74 @@ export const allTimeStats = derived(sessions, ($ss) => {
     }
   }
 
-  // Monthly breakdown (last 6 months)
-  const months: { label: string; count: number; minutes: number }[] = [];
-  const now = new Date();
-  for (let i = 0; i < 6; i++) {
-    const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59, 999);
-    const monthSessions = work.filter(
-      (s) => s.completedAt >= monthDate.getTime() && s.completedAt <= monthEnd.getTime()
-    );
-    const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
-    months.push({
-      label: `${monthNames[monthDate.getMonth()]} ${monthDate.getFullYear()}`,
-      count: monthSessions.length,
-      minutes: Math.round(monthSessions.reduce((sum, s) => sum + s.duration, 0) / 60),
-    });
-  }
-  months.reverse();
-
-  // Average pomodoros per active day
-  const activeDays = daySet.size;
-  const avgPerDay = activeDays > 0 ? Math.round((totalCount / activeDays) * 10) / 10 : 0;
+  // Available years for filtering
+  const years = [...new Set(work.map((s) => new Date(s.completedAt).getFullYear()))].sort((a, b) => b - a);
 
   return {
     totalCount,
     totalMinutes,
     totalHours: Math.round(totalMinutes / 60 * 10) / 10,
-    currentStreak,
-    longestStreak,
     bestDayDate,
     bestDayCount,
     activeDays,
     avgPerDay,
-    months,
+    years,
   };
 });
+
+/** Compute filtered stats for a given time range */
+export function computeFilteredStats(
+  allSessions: PomodoroSession[],
+  filter: { type: "day"; date: string } | { type: "month"; year: number; month: number } | { type: "year"; year: number } | { type: "all" }
+): { count: number; minutes: number; hours: number; days: { date: string; count: number; minutes: number }[] } {
+  const work = allSessions.filter((s) => s.type === "work");
+  let filtered: PomodoroSession[];
+
+  switch (filter.type) {
+    case "day": {
+      const start = new Date(filter.date);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      filtered = work.filter((s) => s.completedAt >= start.getTime() && s.completedAt < end.getTime());
+      break;
+    }
+    case "month": {
+      const start = new Date(filter.year, filter.month, 1);
+      const end = new Date(filter.year, filter.month + 1, 1);
+      filtered = work.filter((s) => s.completedAt >= start.getTime() && s.completedAt < end.getTime());
+      break;
+    }
+    case "year": {
+      const start = new Date(filter.year, 0, 1);
+      const end = new Date(filter.year + 1, 0, 1);
+      filtered = work.filter((s) => s.completedAt >= start.getTime() && s.completedAt < end.getTime());
+      break;
+    }
+    default:
+      filtered = work;
+  }
+
+  const minutes = Math.round(filtered.reduce((sum, s) => sum + s.duration, 0) / 60);
+
+  // Per-day breakdown within the filtered range
+  const dayMap = new Map<string, { count: number; minutes: number }>();
+  for (const s of filtered) {
+    const d = new Date(s.completedAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const existing = dayMap.get(key) || { count: 0, minutes: 0 };
+    existing.count++;
+    existing.minutes += Math.round(s.duration / 60);
+    dayMap.set(key, existing);
+  }
+  const days = [...dayMap.entries()]
+    .map(([date, data]) => ({ date, ...data }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    count: filtered.length,
+    minutes,
+    hours: Math.round(minutes / 60 * 10) / 10,
+    days,
+  };
+}

@@ -56,7 +56,7 @@
 
 <div class="task-view" in:fly={{ y: 14, duration: 220, delay: 80 }}>
   <!-- Header -->
-  <header class="header">
+  <header class="header sticky-header">
     <div class="header-left">
       <button class="icon-btn back-btn" on:click={onBack} title="Zurück">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

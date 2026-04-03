@@ -7,6 +7,14 @@ use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 use url::Url;
 use chrono::{Local, Datelike};
 
+/// Returns the directory containing the running executable.
+#[tauri::command]
+async fn get_exe_dir() -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("Could not determine exe directory")?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
 /// Starts a temporary local HTTP server, opens the Google OAuth consent screen,
 /// and returns the authorization code from the callback.
 #[tauri::command]
@@ -199,7 +207,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![start_oauth_flow, export_backup, import_backup, check_backup_needed])
+        .invoke_handler(tauri::generate_handler![start_oauth_flow, export_backup, import_backup, check_backup_needed, get_exe_dir])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(img) = Image::from_bytes(include_bytes!("../icons/icon.png")) {

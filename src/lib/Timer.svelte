@@ -2,12 +2,13 @@
   import { onMount, onDestroy, getContext } from "svelte";
   import { get } from "svelte/store";
   import type { Writable } from "svelte/store";
-  import { timer, settings, tasks, playCompletionSound, todayStats, musicPlayerState, musicStatusMessage, skipSong, toggleMusic, checkAndPerformAutoBackup } from "./store";
+  import { timer, settings, tasks, playCompletionSound, todayStats, musicPlayerState, musicStatusMessage, skipSong, toggleMusic, checkAndPerformAutoBackup, initDefaultBackupPath, activePlan, stopPlan } from "./store";
   import type { SessionType } from "./types";
 
   export let onGoTasks: () => void;
   export let onGoSettings: () => void;
   export let onGoStats: () => void;
+  export let onGoPlanner: () => void;
 
   const theme = getContext<Writable<"light" | "dark">>("theme");
   const toggleTheme = getContext<() => void>("toggleTheme");
@@ -82,9 +83,11 @@
   }
 
   onMount(() => {
-    // Auto backup check on app start
-    checkAndPerformAutoBackup().then((path) => {
-      if (path) console.log("Auto-Backup erstellt:", path);
+    // Set default backup path on first run, then check auto backup
+    initDefaultBackupPath().then(() => {
+      checkAndPerformAutoBackup().then((path) => {
+        if (path) console.log("Auto-Backup erstellt:", path);
+      });
     });
 
     timer.setOnComplete((sessionType: SessionType) => {
@@ -146,6 +149,11 @@
           </svg>
         {/if}
       </button>
+      <button class="icon-btn" on:click={onGoPlanner} title="Session Planer">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+      </button>
       <button class="icon-btn" on:click={onGoStats} title="Statistiken">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
@@ -173,6 +181,15 @@
       </button>
     {/each}
   </div>
+
+  <!-- Active Plan Indicator -->
+  {#if $activePlan}
+    <div class="plan-indicator">
+      <span class="plan-indicator-name">{$activePlan.planName}</span>
+      <span class="plan-indicator-step">Schritt {$activePlan.currentStepIndex + 1}/{$activePlan.steps.length}</span>
+      <button class="plan-indicator-stop" on:click={() => { stopPlan(); timer.reset(); }} title="Plan abbrechen">✕</button>
+    </div>
+  {/if}
 
   <!-- SVG Timer Circle -->
   <div class="timer-circle-wrapper">
@@ -215,20 +232,38 @@
     </div>
   </div>
 
-  <!-- Session Progress Dots -->
-  <div class="session-dots">
-    {#each Array(sessionsBeforeLong) as _, i}
-      <span
-        class="dot"
-        class:dot-filled={i < sessionsCompletedInCycle}
-        class:dot-active={i === sessionsCompletedInCycle && $timer.sessionType === "work"}
-        title="Session {i + 1}/{sessionsBeforeLong}"
-      ></span>
-    {/each}
-    <span class="dots-label">
-      {sessionsCompletedInCycle}/{sessionsBeforeLong} bis Lange Pause
-    </span>
-  </div>
+  <!-- Session Progress Dots / Plan Progress -->
+  {#if $activePlan}
+    <div class="session-dots">
+      {#each $activePlan.steps as step, i}
+        <span
+          class="dot"
+          class:dot-filled={i < $activePlan.currentStepIndex}
+          class:dot-active={i === $activePlan.currentStepIndex}
+          class:dot-work={step.type === "work"}
+          class:dot-break={step.type !== "work"}
+          title="{typeLabels[step.type]} — {step.durationMinutes} Min."
+        ></span>
+      {/each}
+      <span class="dots-label">
+        {$activePlan.currentStepIndex + 1}/{$activePlan.steps.length} Schritte
+      </span>
+    </div>
+  {:else}
+    <div class="session-dots">
+      {#each Array(sessionsBeforeLong) as _, i}
+        <span
+          class="dot"
+          class:dot-filled={i < sessionsCompletedInCycle}
+          class:dot-active={i === sessionsCompletedInCycle && $timer.sessionType === "work"}
+          title="Session {i + 1}/{sessionsBeforeLong}"
+        ></span>
+      {/each}
+      <span class="dots-label">
+        {sessionsCompletedInCycle}/{sessionsBeforeLong} bis Lange Pause
+      </span>
+    </div>
+  {/if}
 
   <!-- Controls -->
   <div class="controls">
@@ -501,6 +536,16 @@
     animation: pulse-dot 2s ease-in-out infinite;
   }
 
+  .dot-active.dot-break {
+    border-color: var(--success);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
+  }
+
+  .dot-break.dot-filled {
+    background: var(--success);
+    border-color: var(--success);
+  }
+
   @keyframes pulse-dot {
     0%, 100% { box-shadow: 0 0 0 2px var(--accent-bg); }
     50% { box-shadow: 0 0 0 4px var(--accent-bg); }
@@ -609,6 +654,41 @@
     font-size: 11px;
     color: var(--text-muted);
     opacity: 0.6;
+  }
+
+  /* Plan Indicator */
+  .plan-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    background: var(--accent-bg);
+    border: 1.5px solid var(--accent-border);
+    border-radius: 20px;
+    margin-bottom: 12px;
+  }
+
+  .plan-indicator-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .plan-indicator-step {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .plan-indicator-stop {
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 1;
+    padding: 0 2px;
+  }
+
+  .plan-indicator-stop:hover {
+    color: var(--danger);
   }
 
   .shortcut-hint kbd {

@@ -22,6 +22,34 @@
   let loadingTimeout: ReturnType<typeof setTimeout> | null = null;
   let userToggleUntil = 0;
 
+  // ── Custom shuffle state ──
+  // We manage our own shuffle order so every song plays exactly once
+  // before any repeats. YouTube's built-in shuffle allows repeats.
+  let shuffleOrder: number[] = [];   // shuffled indices into the playlist
+  let shufflePosition = 0;           // current position within shuffleOrder
+
+  /** Fisher-Yates shuffle: create a new random permutation of [0..n) */
+  function createShuffleOrder(n: number): number[] {
+    const arr = Array.from({ length: n }, (_, i) => i);
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  /** Get the next playlist index from our shuffle, re-shuffling when exhausted */
+  function nextShuffleIndex(): number {
+    if (shuffleOrder.length === 0) return 0;
+    shufflePosition++;
+    if (shufflePosition >= shuffleOrder.length) {
+      // All songs played — reshuffle for next round
+      shuffleOrder = createShuffleOrder(shuffleOrder.length);
+      shufflePosition = 0;
+    }
+    return shuffleOrder[shufflePosition];
+  }
+
   const ERROR_NAMES: Record<number, string> = {
     2: "Ungültiger Parameter",
     5: "HTML5-Player Fehler",
@@ -64,7 +92,10 @@
 
     if (!desiredId) return;
 
+    // Playlist changed — stop old and load new
     if (desiredId !== loadedPlaylistId && desiredId !== pendingPlaylistId) {
+      // Invalidate old playlist immediately to prevent ghost events
+      loadedPlaylistId = null;
       doLoadPlaylist(desiredId);
       return;
     }
@@ -79,7 +110,8 @@
         musicPlayerState.set("playing");
         setStatus("Fortsetzen...");
         userToggleUntil = Date.now() + 2000;
-      } else if (state === -1 || state === 0 || state === 5) {
+      } else if (state === -1 || state === 5) {
+        // Unstarted or cued — reload playlist
         doLoadPlaylist(desiredId);
       } else if (state !== 1 && state !== 3) {
         player.playVideo();
@@ -107,6 +139,8 @@
     loadRetryCount = 0;
     pendingVideoIds = [];
     playlistLoadStarted = false;
+    shuffleOrder = [];
+    shufflePosition = 0;
     clearLoadingTimeout();
     musicPlayerState.set("loading");
 
@@ -284,15 +318,18 @@
 
         hasEverPlayed = true;
 
-        // Shuffle jump (still muted)
+        // Initialise our own shuffle order (still muted for the first jump)
         if (!shuffleDone) {
           shuffleDone = true;
           if (totalVideos > 1) {
             try {
-              player.setShuffle(true);
-              const randomIndex = Math.floor(Math.random() * totalVideos);
-              setStatus(`Shuffle → Video ${randomIndex + 1}/${totalVideos}`);
-              player.playVideoAt(randomIndex);
+              // Disable YouTube's built-in shuffle — we manage order ourselves
+              player.setShuffle(false);
+              shuffleOrder = createShuffleOrder(totalVideos);
+              shufflePosition = 0;
+              const firstIndex = shuffleOrder[0];
+              setStatus(`Shuffle → Video ${firstIndex + 1}/${totalVideos}`);
+              player.playVideoAt(firstIndex);
               return;
             } catch {}
           }
@@ -324,10 +361,23 @@
         setStatus("Pausiert");
         musicPlayerState.set("paused");
         break;
-      case 0: // ended
-        setStatus("Playlist beendet");
-        musicPlayerState.set("idle");
+      case 0: { // ended — advance to next song in our shuffle order
+        if (totalVideos > 1 && shuffleOrder.length > 0) {
+          const nextIdx = nextShuffleIndex();
+          setStatus(`Nächster Song (${shufflePosition + 1}/${shuffleOrder.length})...`);
+          try {
+            player.playVideoAt(nextIdx);
+          } catch {
+            try { player.playVideo(); } catch {}
+          }
+        } else if (totalVideos === 1) {
+          try { player.playVideoAt(0); } catch {}
+        } else {
+          setStatus("Playlist beendet");
+          musicPlayerState.set("idle");
+        }
         break;
+      }
       case 3: // buffering
         setStatus("Puffern...");
         musicPlayerState.set("loading");
@@ -416,9 +466,18 @@
   function handleSkipSong() {
     if (!player || !apiReady) return;
     try {
-      setStatus("Überspringe...");
-      player.nextVideo();
-    } catch {}
+      if (shuffleOrder.length > 0) {
+        // Use our managed shuffle order
+        const nextIdx = nextShuffleIndex();
+        setStatus(`Überspringe → ${shufflePosition + 1}/${shuffleOrder.length}...`);
+        player.playVideoAt(nextIdx);
+      } else {
+        setStatus("Überspringe...");
+        player.nextVideo();
+      }
+    } catch {
+      try { player.nextVideo(); } catch {}
+    }
   }
 
   let toggleDebounce = 0;

@@ -281,6 +281,17 @@ button {
 }
 
 
+/* ─── Sticky Sub-View Header ─── */
+.sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg);
+  padding-bottom: 8px;
+  margin-top: -4px;
+  padding-top: 4px;
+}
+
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar {
   width: 6px;

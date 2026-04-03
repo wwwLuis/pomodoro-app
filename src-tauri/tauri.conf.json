@@ -15,8 +15,8 @@
         "title": "Pomodoro Timer",
         "width": 480,
         "height": 780,
-        "minWidth": 400,
-        "minHeight": 680
+        "minWidth": 480,
+        "minHeight": 780
       }
     ],
     "security": {

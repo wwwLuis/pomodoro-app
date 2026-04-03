@@ -5,10 +5,11 @@
   import Statistics from "$lib/Statistics.svelte";
   import ExtendedStatistics from "$lib/ExtendedStatistics.svelte";
   import Settings from "$lib/Settings.svelte";
+  import SessionPlanner from "$lib/SessionPlanner.svelte";
   import YouTubePlayer from "$lib/YouTubePlayer.svelte";
   import { settings } from "$lib/store";
 
-  type View = "timer" | "tasks" | "stats" | "extendedStats" | "settings";
+  type View = "timer" | "tasks" | "stats" | "extendedStats" | "settings" | "planner";
   let view: View = "timer";
 </script>
 
@@ -24,6 +25,7 @@
         onGoTasks={() => (view = "tasks")}
         onGoSettings={() => (view = "settings")}
         onGoStats={() => (view = "stats")}
+        onGoPlanner={() => (view = "planner")}
       />
     {:else if view === "tasks"}
       <TaskList onBack={() => (view = "timer")} />
@@ -33,6 +35,8 @@
       <ExtendedStatistics onBack={() => (view = "stats")} />
     {:else if view === "settings"}
       <Settings onBack={() => (view = "timer")} />
+    {:else if view === "planner"}
+      <SessionPlanner onBack={() => (view = "timer")} />
     {/if}
   </div>
 {/key}
