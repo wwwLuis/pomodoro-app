@@ -47,6 +47,18 @@ Create tasks with a target number of pomodoros. Assign a task to the timer — c
 
 View your daily pomodoro count in a bar chart (Monday–Sunday). Summary cards show today's and this week's totals. A task breakdown shows which tasks consumed the most focus time.
 
+### Extended Statistics
+
+Dive deeper with all-time and filtered statistics. Summary cards show total pomodoros, total focus hours, active days, and average per day. A "best day" card highlights your most productive day. Filter by all-time, year, month, or specific day — the bar chart and summaries update dynamically.
+
+### Session Planner
+
+Create custom session plans with multiple steps. Each step has a session type (focus, short break, or long break) and a custom duration (1–180 minutes). The timer follows the plan step by step, showing visual progress dots for completed and upcoming steps. When a plan finishes, the timer resets to its default state.
+
+### Backup & Restore
+
+Export all your data (settings, sessions, tasks) as a JSON backup file. Import a backup to restore or merge data — sessions and tasks are merged by ID to avoid duplicates. Choose a backup folder in Settings; the app defaults to a `backup` directory next to the executable. An automatic weekly check reminds you when a backup is due.
+
 ### Configurable Settings
 
 Adjust focus duration, short break, long break, and sessions before long break. Toggle auto-start, sound notifications, and always-on-top window mode.
@@ -77,7 +89,7 @@ Play background music from your YouTube playlists during focus sessions. Music s
 - **Playlist picker** — Visual list of your playlists with thumbnails, titles, and video count
 - **URL fallback** — Paste any YouTube playlist URL as an alternative (no login required)
 - **Volume control** — Adjustable slider (0–100%)
-- **Shuffle mode** — Songs play in random order
+- **Shuffle mode** — Fisher-Yates shuffle ensures every song plays exactly once before the playlist repeats
 - **Skip song** — Jump to the next track
 - **Smart video filtering** — Deleted, private, and non-embeddable videos are automatically detected via the YouTube Videos API and excluded before playback
 - **Robust error handling** — Unplayable videos are skipped automatically with multiple retry strategies and fallback mechanisms
@@ -104,20 +116,22 @@ Play background music from your YouTube playlists during focus sessions. Music s
 | SVG Countdown  |    | Add / Edit / Del   |    | Today & Week       |
 | Start / Pause  |    | Target Pomodoros   |    | Bar Chart (7 days) |
 | Reset / Skip   |    | Progress Tracking  |    | Task Breakdown     |
-| Session Pills  |    | Set Active Task    |    |                    |
-| Active Task    |    |                    |    |                    |
-| Today Stats    |    +--------------------+    +--------------------+
+| Session Pills  |    | Set Active Task    |    | → Extended Stats   |
+| Plan Progress  |    |                    |    |                    |
+| Active Task    |    +--------------------+    +--------------------+
+| Today Stats    |
 +----------------+
         |
         v
-+--------------------+
-| Settings           |
-|                    |
-| Timer Durations    |
-| Auto-Start         |
-| Sound / On-Top     |
-| Music / Playlists  |
-+--------------------+
++--------------------+    +--------------------+    +--------------------+
+| Settings           |    | Session Planner    |    | Extended Stats     |
+|                    |    |                    |    |                    |
+| Timer Durations    |    | Custom Plans       |    | All-Time Totals    |
+| Auto-Start         |    | Step Builder       |    | Filter by Period   |
+| Sound / On-Top     |    | Duration & Type    |    | Best Day           |
+| Music / Playlists  |    | Plan Preview       |    | Active Days        |
+| Backup / Restore   |    |                    |    |                    |
++--------------------+    +--------------------+    +--------------------+
 ```
 
 ### Workflow
@@ -125,7 +139,9 @@ Play background music from your YouTube playlists during focus sessions. Music s
 1. **Start a focus session** — Hit Start or press `Ctrl+2`. The circular timer counts down from 25 minutes (configurable).
 2. **Assign a task** — Click the task card below the timer to select what you're working on. Completed pomodoros are counted automatically.
 3. **Take breaks** — When the timer completes, a notification and sound play. The app switches to a break session (short or long depending on the cycle).
-4. **Review your stats** — Open Statistics to see your daily and weekly focus summary.
+4. **Use a session plan** *(optional)* — Create a custom plan with specific session types and durations. The timer follows the plan step by step, showing your progress.
+5. **Review your stats** — Open Statistics to see your daily and weekly focus summary, or Extended Statistics for all-time and filtered views.
+6. **Back up your data** — Export your data as a JSON file from Settings. The app reminds you weekly if no backup has been made.
 
 ### Timer State Machine
 
@@ -147,6 +163,7 @@ All data is stored exclusively in the **localStorage** of the Tauri WebView — 
 | `pomo-tasks` | All tasks (JSON) |
 | `pomo-sessions` | Completed sessions (JSON, max 500) |
 | `pomo-theme` | Active theme (`light` / `dark`) |
+| `pomo-session-plans` | Custom session plans (JSON) |
 | `pomo-google-auth` | Google OAuth tokens for YouTube access (JSON) |
 
 ---
@@ -194,7 +211,7 @@ All data is stored exclusively in the **localStorage** of the Tauri WebView — 
 
 **State management** is handled through custom Svelte stores in `store.ts`. Each store (Settings, Tasks, Sessions, Timer, Google Auth, Music Player) encapsulates load, save, and mutation logic, automatically persisting changes to localStorage. Derived stores like `todayStats`, `weekStats`, and `musicShouldPlay` reactively compute their values from the base stores.
 
-**View routing** is controlled in `+page.svelte` via a simple state variable (`view: "timer" | "tasks" | "stats" | "settings"`) — no URL-based routing needed since the app is a single-window desktop tool.
+**View routing** is controlled in `+page.svelte` via a simple state variable (`view: "timer" | "tasks" | "stats" | "extendedStats" | "settings" | "planner"`) — no URL-based routing needed since the app is a single-window desktop tool.
 
 ### Backend (Rust / Tauri)
 
@@ -210,7 +227,8 @@ The Rust backend is intentionally minimal. It only handles tasks that a pure web
 - **Window management**: Show, hide, unminimize, and focus the window — used by the shortcut handler and the frontend's session-complete callback
 - **Theme sync**: Sets the native title bar theme to match the app theme
 - **Google OAuth flow**: Spins up a temporary local HTTP server, opens the browser for Google consent, and captures the authorization code
-- **Plugin initialization**: Activates the `global-shortcut`, `notification`, and `opener` plugins on startup
+- **Backup operations**: Exports and imports JSON backup files to/from the file system, checks if a weekly backup is due
+- **Plugin initialization**: Activates the `global-shortcut`, `notification`, `dialog`, and `opener` plugins on startup
 
 All business logic — timer management, task tracking, statistics — runs entirely in the frontend.
 
@@ -240,6 +258,8 @@ pomodoro-app/
 │   │   ├── TaskList.svelte       # Task CRUD, progress tracking
 │   │   ├── Statistics.svelte     # Weekly bar chart, task breakdown
 │   │   ├── Settings.svelte       # Configuration panel (incl. music settings)
+│   │   ├── ExtendedStatistics.svelte # Filterable all-time/period statistics
+│   │   ├── SessionPlanner.svelte # Custom session plan builder
 │   │   ├── YouTubePlayer.svelte  # Hidden YouTube IFrame player, playlist loading, error handling
 │   │   └── PlaylistPicker.svelte # Google login, playlist browser, URL input
 │   ├── app.css                   # Global styles (light/dark themes)
